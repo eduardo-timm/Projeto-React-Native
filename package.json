@@ -1,0 +1,28 @@
+{
+  "name": "projeto-react-native",
+  "version": "1.0.0",
+  "description": "Projeto De Uma Controladora De Estoque Utilizando React Native",
+  "main": "teste.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node teste.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eduardo-timm/Projeto-React-Native.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/eduardo-timm/Projeto-React-Native/issues"
+  },
+  "homepage": "https://github.com/eduardo-timm/Projeto-React-Native#readme",
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.21"
+  }
+}
