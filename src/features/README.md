@@ -1,0 +1,1 @@
+Contém as funcionalidades principais do aplicativo.
