@@ -1,22 +1,23 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 
-import { migrarBanco, NOME_BANCO } from '../banco/banco';
+import { AberturaAnimada } from '../componentes/AberturaAnimada';
+import { ProvedorSessao, useSessao } from '../sessao';
 import { ProvedorTema, useTema } from '../tema';
 
 export default function LayoutPrincipal() {
   return (
-    <SQLiteProvider databaseName={NOME_BANCO} onInit={migrarBanco}>
-      <ProvedorTema>
+    <ProvedorTema>
+      <ProvedorSessao>
         <Navegacao />
-      </ProvedorTema>
-    </SQLiteProvider>
+      </ProvedorSessao>
+    </ProvedorTema>
   );
 }
 
 function Navegacao() {
   const { cores, esquema } = useTema();
+  const { acesso, usuario } = useSessao();
   const base = esquema === 'escuro' ? DarkTheme : DefaultTheme;
 
   // Tema da navegação: evita "piscar" branco nas transições do modo escuro.
@@ -44,18 +45,32 @@ function Navegacao() {
           contentStyle: { backgroundColor: cores.fundo },
           headerBackButtonDisplayMode: 'minimal',
         }}>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="produtos/index" options={{ title: 'Produtos' }} />
-        <Stack.Screen name="produtos/[id]" options={{ title: 'Detalhes' }} />
-        <Stack.Screen
-          name="escanear"
-          options={{ headerShown: false, animation: 'fade_from_bottom' }}
-        />
-        <Stack.Screen
-          name="formulario-produto"
-          options={{ presentation: 'modal', title: 'Novo produto' }}
-        />
+        {/* 1º: código da equipe ou modo teste (uma vez por celular) */}
+        <Stack.Protected guard={!acesso}>
+          <Stack.Screen name="entrar" options={{ headerShown: false }} />
+        </Stack.Protected>
+
+        {/* 2º: "Quem é você?" (no modo teste o usuário é sempre "Teste") */}
+        <Stack.Protected guard={!!acesso && !usuario}>
+          <Stack.Screen name="quem-e-voce" options={{ headerShown: false }} />
+        </Stack.Protected>
+
+        {/* App */}
+        <Stack.Protected guard={!!acesso && !!usuario}>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="produtos/index" options={{ title: 'Produtos' }} />
+          <Stack.Screen name="produtos/[id]" options={{ title: 'Detalhes' }} />
+          <Stack.Screen
+            name="escanear"
+            options={{ headerShown: false, animation: 'fade_from_bottom' }}
+          />
+          <Stack.Screen
+            name="formulario-produto"
+            options={{ presentation: 'modal', title: 'Novo produto' }}
+          />
+        </Stack.Protected>
       </Stack>
+      <AberturaAnimada />
     </ThemeProvider>
   );
 }

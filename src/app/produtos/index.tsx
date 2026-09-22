@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { listarProdutos, obterSituacao, type Produto } from '../../banco/banco';
+import { combinaComPesquisa, listarProdutos, obterSituacao } from '../../banco/banco';
 import { CartaoProduto } from '../../componentes/CartaoProduto';
-import { Botao, EstadoVazio } from '../../componentes/ui';
+import { Botao, EstadoCarregamento, EstadoVazio } from '../../componentes/ui';
+import { useCarregarAoFocar } from '../../hooks/useCarregarAoFocar';
+import { useSessaoAtiva } from '../../sessao';
 import { espaco, raio, useEstilos, useTema, type Tema } from '../../tema';
 
 type Filtro = 'todos' | 'alerta' | 'ok';
@@ -21,28 +22,25 @@ const FILTROS: { chave: Filtro; rotulo: string }[] = [
 export default function TelaProdutos() {
   const { cores } = useTema();
   const estilos = useEstilos(criarEstilos);
-  const db = useSQLiteContext();
+  const { db } = useSessaoAtiva();
   const margens = useSafeAreaInsets();
   const parametros = useLocalSearchParams<{ filtro?: Filtro }>();
-  const [produtos, setProdutos] = useState<Produto[]>([]);
   const [pesquisa, setPesquisa] = useState('');
   const [filtro, setFiltro] = useState<Filtro>(parametros.filtro ?? 'todos');
 
-  useFocusEffect(
-    useCallback(() => {
-      listarProdutos(db, pesquisa).then(setProdutos);
-    }, [db, pesquisa])
-  );
+  const { dados: produtos, erro, carregando, atualizando, atualizar, recarregar } =
+    useCarregarAoFocar(useCallback(() => listarProdutos(db), [db]));
 
   const visiveis = useMemo(
     () =>
-      produtos.filter((p) => {
+      (produtos ?? []).filter((p) => {
+        if (!combinaComPesquisa(p, pesquisa)) return false;
         const situacao = obterSituacao(p);
         if (filtro === 'alerta') return situacao !== 'ok';
         if (filtro === 'ok') return situacao === 'ok';
         return true;
       }),
-    [produtos, filtro]
+    [produtos, pesquisa, filtro]
   );
 
   const filtrando = pesquisa !== '' || filtro !== 'todos';
@@ -90,16 +88,22 @@ export default function TelaProdutos() {
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={[estilos.lista, { paddingBottom: margens.bottom + 100 }]}
         keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl refreshing={atualizando} onRefresh={atualizar} tintColor={cores.primaria} />
+        }
         renderItem={({ item }) => (
           <CartaoProduto
             produto={item}
             aoPressionar={() =>
-              router.push({ pathname: '/produtos/[id]', params: { id: String(item.id) } })
+              router.push({ pathname: '/produtos/[id]', params: { id: item.id } })
             }
           />
         )}
         ListEmptyComponent={
-          <EstadoVazio
+          carregando || (erro && !produtos) ? (
+            <EstadoCarregamento erro={erro} aoTentarDeNovo={recarregar} />
+          ) : (
+            <EstadoVazio
             icone="cube-outline"
             titulo={filtrando ? 'Nada encontrado' : 'Nenhum produto ainda'}
             mensagem={
@@ -118,6 +122,7 @@ export default function TelaProdutos() {
               )
             }
           />
+          )
         }
       />
 

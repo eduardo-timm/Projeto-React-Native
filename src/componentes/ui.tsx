@@ -142,6 +142,39 @@ export function EstadoVazio({
   );
 }
 
+/** Carregando (primeira vez) ou erro com botão para tentar de novo. */
+export function EstadoCarregamento({
+  erro,
+  aoTentarDeNovo,
+}: {
+  erro: string | null;
+  aoTentarDeNovo: () => void;
+}) {
+  const { cores } = useTema();
+  if (!erro) {
+    return (
+      <View style={{ padding: espaco(10), alignItems: 'center' }}>
+        <ActivityIndicator color={cores.primaria} />
+      </View>
+    );
+  }
+  return (
+    <EstadoVazio
+      icone="cloud-offline-outline"
+      titulo="Não foi possível carregar"
+      mensagem={erro}
+      acao={
+        <Botao
+          titulo="Tentar de novo"
+          icone="refresh"
+          aoPressionar={aoTentarDeNovo}
+          estilo={{ marginTop: 10 }}
+        />
+      }
+    />
+  );
+}
+
 const criarEstilos = ({ cores, sombra }: Tema) => StyleSheet.create({
   botao: {
     height: 54,

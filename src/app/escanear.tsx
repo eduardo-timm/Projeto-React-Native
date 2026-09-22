@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -22,12 +21,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buscarPorCodigo } from '../banco/banco';
 import { CameraSegura, type ControleCamera, type EstadoCamera } from '../componentes/CameraSegura';
 import { Botao, type NomeIcone } from '../componentes/ui';
+import { useSessaoAtiva } from '../sessao';
 import { espaco, raio, useEstilos, useTema, type Tema } from '../tema';
+import { mostrarErro } from '../utilitarios/erros';
 
 export default function TelaEscanear() {
   const { cores } = useTema();
   const estilos = useEstilos(criarEstilos);
-  const db = useSQLiteContext();
+  const { db } = useSessaoAtiva();
   const margens = useSafeAreaInsets();
   const [permissao, pedirPermissao] = useCameraPermissions();
   const cameraRef = useRef<ControleCamera>(null);
@@ -49,11 +50,17 @@ export default function TelaEscanear() {
     async (bruto: string) => {
       const codigo = bruto.trim();
       if (!codigo) return;
-      const produto = await buscarPorCodigo(db, codigo);
-      if (produto) {
-        router.push({ pathname: '/produtos/[id]', params: { id: String(produto.id) } });
-      } else {
-        router.push({ pathname: '/formulario-produto', params: { codigo } });
+      try {
+        const produto = await buscarPorCodigo(db, codigo);
+        if (produto) {
+          router.push({ pathname: '/produtos/[id]', params: { id: produto.id } });
+        } else {
+          router.push({ pathname: '/formulario-produto', params: { codigo } });
+        }
+      } catch (e) {
+        mostrarErro(e);
+        // Libera o scanner para tentar de novo depois do aviso.
+        leituraTravada.current = false;
       }
     },
     [db]

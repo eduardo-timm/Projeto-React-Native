@@ -1,24 +1,19 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Usuario } from '../sessao';
+import { mensagemDeErro } from '../utilitarios/erros';
+import type { ClienteSupabase } from './supabase';
+import type { Database } from './tipos-supabase';
 
-export type Produto = {
-  id: number;
-  nome: string;
-  codigo_barras: string | null;
-  categoria: string | null;
-  quantidade: number;
-  quantidade_minima: number;
-  preco: number;
-  criado_em: string;
-  atualizado_em: string;
-};
+export type Produto = Database['public']['Tables']['produtos']['Row'];
+export type Movimentacao = Database['public']['Tables']['movimentacoes']['Row'];
+export type TipoMovimentacao = 'entrada' | 'saida';
 
 export type DadosProduto = {
   nome: string;
   codigo_barras: string | null;
   categoria: string | null;
-  quantidade: number;
+  descricao: string | null;
   quantidade_minima: number;
-  preco: number;
+  preco_unitario: number;
 };
 
 export type SituacaoStock = 'ok' | 'baixo' | 'esgotado';
@@ -31,38 +26,21 @@ export type ResumoStock = {
   valorTotal: number;
 };
 
-export const NOME_BANCO = 'stock.db';
-const VERSAO_BANCO = 1;
+/** Resposta do Supabase: devolve os dados ou lança um erro com mensagem amigável. */
+function verificar<T>({ data, error }: { data: T; error: unknown }): T {
+  if (error) throw new Error(mensagemDeErro(error));
+  return data;
+}
 
-/**
- * Roda ao abrir o app via <SQLiteProvider onInit>.
- * Para uma nova migração: aumente VERSAO_BANCO e adicione um novo bloco `if (versaoAtual === N)`.
- */
-export async function migrarBanco(db: SQLiteDatabase) {
-  const linha = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  let versaoAtual = linha?.user_version ?? 0;
-  if (versaoAtual >= VERSAO_BANCO) return;
-
-  if (versaoAtual === 0) {
-    await db.execAsync(`
-      PRAGMA journal_mode = 'wal';
-      CREATE TABLE IF NOT EXISTS produtos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        codigo_barras TEXT UNIQUE,
-        categoria TEXT,
-        quantidade INTEGER NOT NULL DEFAULT 0,
-        quantidade_minima INTEGER NOT NULL DEFAULT 0,
-        preco REAL NOT NULL DEFAULT 0,
-        criado_em TEXT NOT NULL DEFAULT (datetime('now')),
-        atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-      CREATE INDEX IF NOT EXISTS idx_produtos_nome ON produtos(nome);
-    `);
-    versaoAtual = 1;
-  }
-
-  await db.execAsync(`PRAGMA user_version = ${VERSAO_BANCO}`);
+function limpar(dados: DadosProduto) {
+  return {
+    nome: dados.nome.trim(),
+    codigo_barras: dados.codigo_barras?.trim() || null,
+    categoria: dados.categoria?.trim() || null,
+    descricao: dados.descricao?.trim() || null,
+    quantidade_minima: dados.quantidade_minima,
+    preco_unitario: dados.preco_unitario,
+  };
 }
 
 export function obterSituacao(p: Pick<Produto, 'quantidade' | 'quantidade_minima'>): SituacaoStock {
@@ -71,80 +49,87 @@ export function obterSituacao(p: Pick<Produto, 'quantidade' | 'quantidade_minima
   return 'ok';
 }
 
-export function listarProdutos(db: SQLiteDatabase, pesquisa = '') {
-  const termo = `%${pesquisa.trim()}%`;
-  return db.getAllAsync<Produto>(
-    `SELECT * FROM produtos
-     WHERE nome LIKE ? OR IFNULL(codigo_barras, '') LIKE ? OR IFNULL(categoria, '') LIKE ?
-     ORDER BY nome COLLATE NOCASE`,
-    termo,
-    termo,
-    termo
+/** Todos os produtos do espaço atual. A pesquisa é feita no celular (ver `combinaComPesquisa`). */
+export async function listarProdutos(db: ClienteSupabase) {
+  return verificar(await db.from('produtos').select('*').order('nome'));
+}
+
+/** Pesquisa sem diferenciar maiúsculas nem acentos ("feijao" encontra "Feijão"). */
+export function combinaComPesquisa(produto: Produto, pesquisa: string) {
+  const normalizar = (t: string) =>
+    t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const termo = normalizar(pesquisa.trim());
+  if (!termo) return true;
+  return [produto.nome, produto.codigo_barras, produto.categoria].some(
+    (campo) => campo && normalizar(campo).includes(termo)
   );
 }
 
-export function buscarProduto(db: SQLiteDatabase, id: number) {
-  return db.getFirstAsync<Produto>('SELECT * FROM produtos WHERE id = ?', id);
+export async function buscarProduto(db: ClienteSupabase, id: string) {
+  return verificar(await db.from('produtos').select('*').eq('id', id).maybeSingle());
 }
 
-export function buscarPorCodigo(db: SQLiteDatabase, codigo: string) {
-  return db.getFirstAsync<Produto>('SELECT * FROM produtos WHERE codigo_barras = ?', codigo.trim());
-}
-
-export async function criarProduto(db: SQLiteDatabase, dados: DadosProduto) {
-  const resultado = await db.runAsync(
-    `INSERT INTO produtos (nome, codigo_barras, categoria, quantidade, quantidade_minima, preco)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    dados.nome.trim(),
-    dados.codigo_barras?.trim() || null,
-    dados.categoria?.trim() || null,
-    dados.quantidade,
-    dados.quantidade_minima,
-    dados.preco
-  );
-  return resultado.lastInsertRowId;
-}
-
-export async function atualizarProduto(db: SQLiteDatabase, id: number, dados: DadosProduto) {
-  await db.runAsync(
-    `UPDATE produtos
-     SET nome = ?, codigo_barras = ?, categoria = ?, quantidade = ?, quantidade_minima = ?, preco = ?,
-         atualizado_em = datetime('now')
-     WHERE id = ?`,
-    dados.nome.trim(),
-    dados.codigo_barras?.trim() || null,
-    dados.categoria?.trim() || null,
-    dados.quantidade,
-    dados.quantidade_minima,
-    dados.preco,
-    id
+export async function buscarPorCodigo(db: ClienteSupabase, codigo: string) {
+  return verificar(
+    await db.from('produtos').select('*').eq('codigo_barras', codigo.trim()).maybeSingle()
   );
 }
 
-/** Entrada (delta positivo) ou saída (delta negativo). Nunca fica abaixo de zero. */
-export async function ajustarQuantidade(db: SQLiteDatabase, id: number, delta: number) {
-  await db.runAsync(
-    `UPDATE produtos
-     SET quantidade = MAX(0, quantidade + ?), atualizado_em = datetime('now')
-     WHERE id = ?`,
-    delta,
-    id
+/** Cria o produto e, se tiver quantidade inicial, registra como entrada no histórico. */
+export async function criarProduto(
+  db: ClienteSupabase,
+  dados: DadosProduto,
+  quantidadeInicial: number,
+  usuario: Usuario
+) {
+  const produto = verificar(
+    await db.from('produtos').insert(limpar(dados)).select('id').single()
+  );
+  if (!produto) throw new Error('Não foi possível criar o produto.');
+  if (quantidadeInicial > 0) {
+    await registrarMovimentacao(db, produto.id, 'entrada', quantidadeInicial, usuario);
+  }
+  return produto.id;
+}
+
+/** Atualiza os dados do produto. A quantidade só muda por entrada/saída (fica no histórico). */
+export async function atualizarProduto(db: ClienteSupabase, id: string, dados: DadosProduto) {
+  verificar(await db.from('produtos').update(limpar(dados)).eq('id', id));
+}
+
+/** Entrada ou saída atômica no banco. Devolve a nova quantidade. */
+export async function registrarMovimentacao(
+  db: ClienteSupabase,
+  produtoId: string,
+  tipo: TipoMovimentacao,
+  quantidade: number,
+  usuario: Usuario
+) {
+  return verificar(
+    await db.rpc('registrar_movimentacao', {
+      p_produto_id: produtoId,
+      p_tipo: tipo,
+      p_quantidade: quantidade,
+      p_usuario: usuario,
+    })
   );
 }
 
-export async function excluirProduto(db: SQLiteDatabase, id: number) {
-  await db.runAsync('DELETE FROM produtos WHERE id = ?', id);
+export async function listarMovimentacoes(db: ClienteSupabase, produtoId: string, limite = 20) {
+  return verificar(
+    await db
+      .from('movimentacoes')
+      .select('*')
+      .eq('produto_id', produtoId)
+      .order('criado_em', { ascending: false })
+      .limit(limite)
+  ) as Movimentacao[];
 }
 
-export async function obterResumo(db: SQLiteDatabase): Promise<ResumoStock> {
-  const linha = await db.getFirstAsync<ResumoStock>(`
-    SELECT
-      COUNT(*) AS totalProdutos,
-      IFNULL(SUM(quantidade), 0) AS totalUnidades,
-      IFNULL(SUM(CASE WHEN quantidade > 0 AND quantidade <= quantidade_minima THEN 1 ELSE 0 END), 0) AS stockBaixo,
-      IFNULL(SUM(CASE WHEN quantidade <= 0 THEN 1 ELSE 0 END), 0) AS esgotados,
-      IFNULL(SUM(quantidade * preco), 0) AS valorTotal
-    FROM produtos
-  `);
-  return linha ?? { totalProdutos: 0, totalUnidades: 0, stockBaixo: 0, esgotados: 0, valorTotal: 0 };
+export async function excluirProduto(db: ClienteSupabase, id: string) {
+  verificar(await db.from('produtos').delete().eq('id', id));
+}
+
+export async function obterResumo(db: ClienteSupabase): Promise<ResumoStock> {
+  return verificar(await db.rpc('resumo_stock')) as ResumoStock;
 }

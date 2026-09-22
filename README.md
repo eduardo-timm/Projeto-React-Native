@@ -10,15 +10,17 @@ Lê códigos de barras com a câmera, cadastra produtos e controla entradas e sa
 - **Consulta de produtos**: lista com pesquisa por nome, código ou categoria
 - **Controle de stock**: entrada e saída de unidades, valor total em stock
 - **Alertas de stock**: produtos com stock baixo ou esgotados
+- **Histórico**: quem deu entrada/saída em cada produto, e quando
+- **Equipe**: stock compartilhado entre Eduardo, Tomás e Tiago (dados no Supabase)
+- **Modo Teste**: stock separado para apresentações
 - Tema **claro / escuro / sistema**
-- Funciona offline: os dados ficam salvos no aparelho (SQLite)
 
 ## Tecnologias
 
 - [Expo SDK 57](https://docs.expo.dev) · React Native 0.86 · React 19 · TypeScript
 - Expo Router (navegação por arquivos)
 - expo-camera (leitura de código de barras)
-- expo-sqlite (banco de dados local)
+- Supabase (banco de dados PostgreSQL na nuvem, com RLS)
 
 ## Como rodar
 
@@ -30,6 +32,9 @@ npx expo start
 ```
 
 Escaneie o QR code que aparece no terminal com a câmera do iPhone ou com o Expo Go no Android.
+
+Na primeira vez, o app pede o **código da equipe** (peça para alguém do grupo) ou permite
+entrar no **modo Teste**. Depois é só escolher quem você é.
 
 ## Scripts
 

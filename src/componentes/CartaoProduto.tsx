@@ -37,7 +37,9 @@ export function CartaoProduto({ produto, aoPressionar }: { produto: Produto; aoP
       <View style={estilos.direita}>
         <Text style={estilos.quantidade}>{produto.quantidade}</Text>
         <Text style={estilos.rotuloQuantidade}>unid.</Text>
-        {produto.preco > 0 && <Text style={estilos.preco}>{formatarMoeda(produto.preco)}</Text>}
+        {produto.preco_unitario > 0 && (
+          <Text style={estilos.preco}>{formatarMoeda(produto.preco_unitario)}</Text>
+        )}
       </View>
     </Pressable>
   );

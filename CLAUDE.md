@@ -3,7 +3,8 @@
 # Armazém
 
 **Armazém** é um app mobile (iOS/Android) de controle de stock: lê códigos de barras, cadastra produtos
-(escaneando ou manualmente) e registra entradas/saídas. Dados ficam no aparelho (SQLite).
+(escaneando ou manualmente) e registra entradas/saídas com histórico de quem fez.
+Dados ficam no **Supabase** (projeto "Estoque App"), compartilhados pela equipe: Eduardo, Tomás e Tiago.
 
 ## Convenções do projeto
 
@@ -39,7 +40,8 @@
 - Expo SDK 57 · React Native 0.86 · React 19.2 · TypeScript (strict)
 - Expo Router (rotas por arquivo em `src/app/`)
 - `expo-camera` (`CameraView` + leitura de código de barras)
-- `expo-sqlite` (banco local, `SQLiteProvider` no `_layout.tsx`)
+- `@supabase/supabase-js` (banco na nuvem; só online)
+- `expo-sqlite/kv-store` (só para guardar preferências no celular: tema e sessão)
 - `expo-linear-gradient`, `expo-haptics`, `@expo/vector-icons` (Ionicons)
 
 ## Estrutura
@@ -47,19 +49,30 @@
 ```
 src/
   app/                         # Rotas (cada arquivo = uma tela)
-    _layout.tsx                # SQLiteProvider + ProvedorTema + Stack (tema aplicado na navegação)
+    _layout.tsx                # ProvedorTema + ProvedorSessao + Stack com rotas protegidas
+    entrar.tsx                 # Código da equipe (1x por celular) ou modo Teste
+    quem-e-voce.tsx            # Escolha: Eduardo / Tomás / Tiago
     index.tsx                  # Início: resumo + "Escanear" / "Gerenciar stock" / "Adicionar manualmente"
     escanear.tsx               # Scanner + digitar código + cadastrar manual
     formulario-produto.tsx     # Modal de cadastro/edição (params: id? | codigo?)
     produtos/index.tsx         # Lista com pesquisa e filtros (param: filtro?)
     produtos/[id].tsx          # Detalhes + entrada/saída + excluir
-  banco/banco.ts               # Tipos, migrações e todas as queries SQL
+  banco/
+    banco.ts                   # Todas as consultas ao Supabase (telas não chamam o Supabase direto)
+    supabase.ts                # Cria o cliente com os cabeçalhos de acesso
+    tipos-supabase.ts          # Tipos gerados do banco (não editar à mão)
+  hooks/useCarregarAoFocar.ts  # Carrega dados ao focar a tela + puxar para atualizar
+  sessao.tsx                   # Acesso (equipe/teste) + usuário escolhido, salvos no celular
   componentes/
+    AberturaAnimada.tsx        # Abertura animada (logo + nome) ao abrir o app
+    Avatar.tsx                 # Círculo com a inicial e a cor de cada pessoa
     CameraSegura.tsx           # Wrapper do CameraView com correção da tela preta no iOS
     CartaoProduto.tsx
     SeletorTema.tsx            # Sistema/Claro/Escuro + botão de alternar
     ui.tsx
-  utilitarios/formatacao.ts
+  utilitarios/formatacao.ts    # Moeda, números e data/hora
+  utilitarios/erros.ts         # Mensagens de erro amigáveis (sem internet, código duplicado…)
+supabase/migrations/          # SQL aplicado no Supabase (histórico do esquema)
   tema.tsx                     # Cores claras/escuras, ProvedorTema, useTema, useEstilos
 scripts/gerar-imagens.mjs      # Gera ícone, ícones Android, splash e favicon a partir de SVG
 ```
@@ -76,6 +89,10 @@ rode `npm run gerar-imagens`.
   iguais a `cores.fundo` de cada tema)
 - O **Expo Go não mostra** o ícone nem a splash personalizados; só aparecem num build
   (`npx eas-cli@latest build`).
+- Por isso existe `AberturaAnimada` (renderizada no `_layout.tsx`): uma abertura feita em JS que
+  aparece em qualquer lugar, inclusive no Expo Go. Ela segura a splash nativa com
+  `SplashScreen.preventAutoHideAsync()` e a esconde no `onLayout`, para a troca não piscar.
+  Duração total ≈ 1,5 s; ajuste os tempos das animações no próprio componente.
 
 ## Fluxo do scanner
 
@@ -103,15 +120,51 @@ Regras extras: nunca renderize duas câmeras ao mesmo tempo e só renderize a c�
 que a permissão (`useCameraPermissions`) estiver concedida.
 Ao migrar para o SDK 58+, teste de novo; os passos 1–3 continuam sendo boas práticas.
 
-## Banco de dados
+## Banco de dados (Supabase)
 
-- Tabela `produtos` (id, nome, codigo_barras UNIQUE, categoria, quantidade, quantidade_minima,
-  preco, criado_em, atualizado_em).
-- Migrações usam `PRAGMA user_version` em `migrarBanco`. Para mudar o esquema: aumente
-  `VERSAO_BANCO` e adicione um novo bloco `if (versaoAtual === N)`. Nunca altere um bloco antigo.
-- Toda query fica em `src/banco/banco.ts`. As telas não escrevem SQL.
-- As telas recarregam os dados com `useFocusEffect`, então voltar de um formulário já mostra a
-  informação atualizada.
+Projeto **"Estoque App"** (`ttbofisxluiptraogxpi`). URL e chave publicável ficam no `.env`
+(`EXPO_PUBLIC_SUPABASE_*`); podem estar no repositório porque quem protege os dados é o RLS.
+**Nunca** coloque a chave secreta (service_role / `sb_secret_...`) no app ou no repositório.
+
+### Acesso sem login (código da equipe + "Quem é você?")
+
+- Não usamos o Supabase Auth. O cliente manda cabeçalhos HTTP em toda requisição:
+  - `x-codigo-equipe: <código>` → espaço **`equipe`** (stock real)
+  - `x-espaco: teste` → espaço **`teste`** (stock separado para apresentações; não pede código)
+- A função `public.espaco_atual()` (SECURITY DEFINER) compara o SHA-256 do código com o hash em
+  `privado.configuracao` (schema fora da API). O código em si **não fica salvo em lugar nenhum**,
+  só no celular de quem digitou (`sessao.tsx`, via kv-store).
+- Toda linha tem a coluna `espaco` (preenchida automaticamente) e o RLS só libera o espaço atual.
+- O advisor do Supabase avisa que `espaco_atual()` é SECURITY DEFINER executável por `anon`:
+  é **intencional** (ela só devolve o espaço de quem chama).
+- Formato do código: **8 números** (`0000-0000`); a tela `entrar.tsx` usa teclado numérico e
+  coloca o traço sozinho. Evite sequências óbvias (1234-5678, 0000-0000…).
+- Trocar o código da equipe: sorteie um código novo, calcule o SHA-256 do código **normalizado**
+  (sem traço, ex.: `12345678`) e rode
+  `update privado.configuracao set valor = '<hash>' where chave = 'hash_codigo_equipe';`
+  Todo mundo vai precisar digitar o código novo.
+- O nome escolhido em "Quem é você?" vai em `movimentacoes.usuario`
+  (check: 'Eduardo', 'Tomás', 'Tiago', 'Teste'). Para adicionar alguém: migração alterando
+  esse check + `USUARIOS_EQUIPE` em `sessao.tsx` + cor em `Avatar.tsx`.
+
+### Tabelas e funções
+
+- `produtos`: id (uuid), nome, codigo_barras (opcional, único **por espaço**), categoria,
+  descricao, quantidade, quantidade_minima, preco_unitario, espaco, criado_em, atualizado_em.
+- `movimentacoes`: produto_id, tipo ('entrada'|'saida'), quantidade, usuario, espaco, criado_em.
+- `registrar_movimentacao(...)`: entrada/saída **atômica** (atualiza a quantidade e grava o
+  histórico juntos; recusa saída maior que o stock). **Sempre** mude quantidade por ela, nunca
+  com `update` direto em `produtos.quantidade`.
+- `resumo_stock()`: números da tela inicial.
+
+### Regras para mudar o esquema
+
+- Crie a migração com o MCP do Supabase (`apply_migration`) **e** salve o mesmo SQL em
+  `supabase/migrations/<timestamp>_<nome>.sql`.
+- Depois: gere os tipos de novo em `src/banco/tipos-supabase.ts` e rode os advisors de segurança.
+- Teste o RLS com os dois espaços (equipe e teste) e sem cabeçalho nenhum.
+- O app é **só online**: erros de rede viram "Sem conexão com a internet" (`utilitarios/erros.ts`).
+  As telas recarregam ao ganhar foco e têm "puxar para atualizar".
 
 ## Comandos
 

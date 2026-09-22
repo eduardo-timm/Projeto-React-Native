@@ -1,41 +1,79 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { useCallback } from 'react';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { obterResumo, type ResumoStock } from '../banco/banco';
+import { obterResumo } from '../banco/banco';
+import { Avatar } from '../componentes/Avatar';
 import { BotaoAlternarTema, SeletorTema } from '../componentes/SeletorTema';
 import type { NomeIcone } from '../componentes/ui';
+import { useCarregarAoFocar } from '../hooks/useCarregarAoFocar';
+import { useSessaoAtiva } from '../sessao';
 import { espaco, raio, useEstilos, useTema, type Tema } from '../tema';
 import { formatarMoeda } from '../utilitarios/formatacao';
 
 export default function TelaInicial() {
   const { cores } = useTema();
   const estilos = useEstilos(criarEstilos);
-  const db = useSQLiteContext();
-  const [resumo, setResumo] = useState<ResumoStock | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      obterResumo(db).then(setResumo);
-    }, [db])
+  const { db, usuario, acesso, trocarUsuario, sair } = useSessaoAtiva();
+  const modoTeste = acesso.tipo === 'teste';
+  const { dados: resumo, erro, atualizando, atualizar } = useCarregarAoFocar(
+    useCallback(() => obterResumo(db), [db])
   );
+
+  function aoTocarNoUsuario() {
+    if (modoTeste) {
+      Alert.alert('Sair do modo Teste?', 'Você volta para a tela do código da equipe.', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Sair', style: 'destructive', onPress: sair },
+      ]);
+    } else {
+      Alert.alert(`Você está como ${usuario}`, 'Quer trocar de pessoa?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Trocar', onPress: trocarUsuario },
+      ]);
+    }
+  }
 
   const alertas = (resumo?.stockBaixo ?? 0) + (resumo?.esgotados ?? 0);
 
   return (
     <SafeAreaView style={estilos.tela} edges={['top']}>
-      <ScrollView contentContainerStyle={estilos.conteudo} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={estilos.conteudo}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={atualizando} onRefresh={atualizar} tintColor={cores.primaria} />
+        }>
         <View style={estilos.cabecalho}>
-          <View>
-            <Text style={estilos.ola}>Olá 👋</Text>
-            <Text style={estilos.titulo}>Armazém</Text>
-          </View>
+          <Pressable onPress={aoTocarNoUsuario} style={estilos.usuario} hitSlop={6}>
+            <Avatar nome={usuario} tamanho={44} />
+            <View>
+              <Text style={estilos.ola}>Olá, {usuario} 👋</Text>
+              <Text style={estilos.titulo}>Armazém</Text>
+            </View>
+          </Pressable>
           <BotaoAlternarTema />
         </View>
+
+        {modoTeste && (
+          <Pressable style={estilos.faixaTeste} onPress={aoTocarNoUsuario}>
+            <Ionicons name="school-outline" size={18} color={cores.primaria} />
+            <Text style={estilos.textoFaixaTeste}>
+              Modo Teste: stock separado, não afeta a equipe.
+            </Text>
+            <Text style={estilos.linkFaixaTeste}>Sair</Text>
+          </Pressable>
+        )}
+
+        {erro && (
+          <Pressable style={estilos.erro} onPress={atualizar}>
+            <Ionicons name="cloud-offline-outline" size={20} color={cores.perigo} />
+            <Text style={estilos.textoErro}>{erro} Toque para tentar de novo.</Text>
+          </Pressable>
+        )}
 
         <LinearGradient
           colors={cores.gradiente}
@@ -145,6 +183,26 @@ const criarEstilos = ({ cores, sombra }: Tema) => StyleSheet.create({
   tela: { flex: 1, backgroundColor: cores.fundo },
   conteudo: { padding: espaco(5), gap: espaco(4), paddingBottom: espaco(10) },
   cabecalho: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  usuario: { flexDirection: 'row', alignItems: 'center', gap: espaco(3), flexShrink: 1 },
+  faixaTeste: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: cores.superficieSuave,
+    borderRadius: raio.medio,
+    padding: espaco(3),
+  },
+  textoFaixaTeste: { flex: 1, color: cores.texto, fontSize: 13 },
+  linkFaixaTeste: { color: cores.primaria, fontWeight: '700' },
+  erro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: cores.perigoFundo,
+    borderRadius: raio.medio,
+    padding: espaco(4),
+  },
+  textoErro: { flex: 1, color: cores.perigo, fontWeight: '600' },
   ola: { fontSize: 15, color: cores.textoSuave },
   titulo: { fontSize: 26, fontWeight: '800', color: cores.texto, letterSpacing: -0.5 },
   destaque: { borderRadius: raio.grande, padding: espaco(6), gap: 6 },

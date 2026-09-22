@@ -1,6 +1,5 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +12,9 @@ import {
   type DadosProduto,
 } from '../banco/banco';
 import { Botao, Campo } from '../componentes/ui';
+import { useSessaoAtiva } from '../sessao';
 import { espaco, useEstilos, type Tema } from '../tema';
+import { mostrarErro } from '../utilitarios/erros';
 import { converterDecimal, converterInteiro } from '../utilitarios/formatacao';
 
 type Erros = Partial<Record<'nome' | 'codigo', string>>;
@@ -24,14 +25,15 @@ type Erros = Partial<Record<'nome' | 'codigo', string>>;
  */
 export default function TelaFormularioProduto() {
   const estilos = useEstilos(criarEstilos);
-  const db = useSQLiteContext();
+  const { db, usuario } = useSessaoAtiva();
   const margens = useSafeAreaInsets();
   const parametros = useLocalSearchParams<{ id?: string; codigo?: string }>();
-  const idEdicao = parametros.id ? Number(parametros.id) : null;
+  const idEdicao = parametros.id ?? null;
 
   const [nome, setNome] = useState('');
   const [codigo, setCodigo] = useState(parametros.codigo ?? '');
   const [categoria, setCategoria] = useState('');
+  const [descricao, setDescricao] = useState('');
   const [quantidade, setQuantidade] = useState('');
   const [quantidadeMinima, setQuantidadeMinima] = useState('');
   const [preco, setPreco] = useState('');
@@ -40,50 +42,55 @@ export default function TelaFormularioProduto() {
 
   useEffect(() => {
     if (!idEdicao) return;
-    buscarProduto(db, idEdicao).then((p) => {
-      if (!p) return;
-      setNome(p.nome);
-      setCodigo(p.codigo_barras ?? '');
-      setCategoria(p.categoria ?? '');
-      setQuantidade(String(p.quantidade));
-      setQuantidadeMinima(String(p.quantidade_minima));
-      setPreco(p.preco ? p.preco.toFixed(2).replace('.', ',') : '');
-    });
+    buscarProduto(db, idEdicao)
+      .then((p) => {
+        if (!p) return;
+        setNome(p.nome);
+        setCodigo(p.codigo_barras ?? '');
+        setCategoria(p.categoria ?? '');
+        setDescricao(p.descricao ?? '');
+        setQuantidadeMinima(String(p.quantidade_minima));
+        setPreco(p.preco_unitario ? p.preco_unitario.toFixed(2).replace('.', ',') : '');
+      })
+      .catch((e) => mostrarErro(e));
   }, [db, idEdicao]);
 
   async function salvar() {
-    const novosErros: Erros = {};
-    if (!nome.trim()) novosErros.nome = 'Informe o nome do produto';
-
-    const codigoLimpo = codigo.trim();
-    if (codigoLimpo) {
-      const existente = await buscarPorCodigo(db, codigoLimpo);
-      if (existente && existente.id !== idEdicao) {
-        novosErros.codigo = `Este código já pertence a "${existente.nome}"`;
-      }
-    }
-
-    setErros(novosErros);
-    if (Object.keys(novosErros).length) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return;
-    }
-
-    const dados: DadosProduto = {
-      nome,
-      codigo_barras: codigoLimpo || null,
-      categoria: categoria || null,
-      quantidade: converterInteiro(quantidade),
-      quantidade_minima: converterInteiro(quantidadeMinima),
-      preco: converterDecimal(preco),
-    };
-
     setSalvando(true);
     try {
+      const novosErros: Erros = {};
+      if (!nome.trim()) novosErros.nome = 'Informe o nome do produto';
+
+      const codigoLimpo = codigo.trim();
+      if (codigoLimpo) {
+        const existente = await buscarPorCodigo(db, codigoLimpo);
+        if (existente && existente.id !== idEdicao) {
+          novosErros.codigo = `Este código já pertence a "${existente.nome}"`;
+        }
+      }
+
+      setErros(novosErros);
+      if (Object.keys(novosErros).length) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        return;
+      }
+
+      const dados: DadosProduto = {
+        nome,
+        codigo_barras: codigoLimpo || null,
+        categoria: categoria || null,
+        descricao: descricao || null,
+        quantidade_minima: converterInteiro(quantidadeMinima),
+        preco_unitario: converterDecimal(preco),
+      };
+
       if (idEdicao) await atualizarProduto(db, idEdicao, dados);
-      else await criarProduto(db, dados);
+      else await criarProduto(db, dados, converterInteiro(quantidade), usuario);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      mostrarErro(e, 'Não foi possível salvar');
     } finally {
       setSalvando(false);
     }
@@ -134,15 +141,18 @@ export default function TelaFormularioProduto() {
           placeholder="Ex.: Alimentos"
         />
         <View style={estilos.linha}>
-          <View style={{ flex: 1 }}>
-            <Campo
-              rotulo="Quantidade"
-              value={quantidade}
-              onChangeText={setQuantidade}
-              placeholder="0"
-              keyboardType="number-pad"
-            />
-          </View>
+          {/* Na edição, a quantidade só muda por entrada/saída (para ficar no histórico). */}
+          {!idEdicao && (
+            <View style={{ flex: 1 }}>
+              <Campo
+                rotulo="Quantidade inicial"
+                value={quantidade}
+                onChangeText={setQuantidade}
+                placeholder="0"
+                keyboardType="number-pad"
+              />
+            </View>
+          )}
           <View style={{ flex: 1 }}>
             <Campo
               rotulo="Stock mínimo"
@@ -160,6 +170,14 @@ export default function TelaFormularioProduto() {
           onChangeText={setPreco}
           placeholder="0,00"
           keyboardType="decimal-pad"
+        />
+        <Campo
+          rotulo="Descrição"
+          icone="document-text-outline"
+          value={descricao}
+          onChangeText={setDescricao}
+          placeholder="Opcional — marca, tamanho, observações…"
+          multiline
         />
 
         <Botao
