@@ -1,1 +1,0 @@
-Contém as regras e funções responsáveis pela lógica dos produtos.

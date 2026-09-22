@@ -1,1 +1,0 @@
-Contém as funções responsáveis pela comunicação dos produtos com a API.

@@ -1,1 +1,0 @@
-Contém os componentes visuais utilizados na funcionalidade de produtos.

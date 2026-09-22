@@ -1,1 +1,0 @@
-Contém as telas principais do aplicativo.
