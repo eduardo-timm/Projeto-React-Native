@@ -1,1 +1,0 @@
-Contém os arquivos relacionados ao gerenciamento de produtos.

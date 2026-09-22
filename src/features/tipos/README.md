@@ -1,1 +1,0 @@
-Contém as definições de tipos utilizadas pelo aplicativo.

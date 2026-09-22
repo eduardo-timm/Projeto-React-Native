@@ -1,1 +1,0 @@
-Contém componentes visuais reutilizados em diferentes partes do aplicativo.

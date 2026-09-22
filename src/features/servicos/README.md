@@ -1,1 +1,0 @@
-Contém serviços utilizados pelo aplicativo.

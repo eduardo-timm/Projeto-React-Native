@@ -1,1 +1,0 @@
-Contém a configuração de navegação entre as telas do aplicativo.
